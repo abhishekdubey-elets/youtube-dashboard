@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -A \"Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\)\" \"https://exhibitors.cphi.com/cpch26/\" -o /tmp/cphi.html -w \"HTTP %{http_code}, size %{size_download}\\\\n\")",
+      "Read(//tmp/**)",
+      "Bash(python -c \"import playwright; print\\('playwright', playwright.__version__\\)\")",
+      "Bash(pip show *)",
+      "Bash(pip install *)",
+      "Bash(python -m playwright install chromium)",
+      "Bash(where python *)",
+      "Bash(where pip *)",
+      "Bash(py --version)",
+      "Bash(py -0p)",
+      "Bash(py -)"
+    ]
+  }
+}

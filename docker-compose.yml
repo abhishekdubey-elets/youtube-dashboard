@@ -1,0 +1,118 @@
+# ============================================================================
+# elets YouTube Transcript Automation Dashboard — Docker Compose
+# ============================================================================
+# Services:
+#   postgres   - primary database
+#   redis      - Celery broker + result backend + cache
+#   backend    - FastAPI app (REST API)
+#   worker     - Celery worker (pipeline jobs)
+#   beat       - Celery beat (periodic cleanup / auto-export)
+#   flower     - Celery monitoring UI (optional, profile: monitoring)
+#   frontend   - Next.js dashboard
+# ============================================================================
+
+x-backend-env: &backend-env
+  env_file: .env
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-elets}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-elets_password}
+      POSTGRES_DB: ${POSTGRES_DB:-elets_transcripts}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-elets} -d ${POSTGRES_DB:-elets_transcripts}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    <<: *backend-env
+    restart: unless-stopped
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers"
+    volumes:
+      - storage:/data/storage
+      - secrets:/data/secrets
+    ports:
+      - "8000:8000"
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    <<: *backend-env
+    restart: unless-stopped
+    command: celery -A app.workers.celery_app.celery worker --loglevel=info --concurrency=2
+    volumes:
+      - storage:/data/storage
+      - secrets:/data/secrets
+
+  beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    <<: *backend-env
+    restart: unless-stopped
+    command: celery -A app.workers.celery_app.celery beat --loglevel=info
+    volumes:
+      - storage:/data/storage
+      - secrets:/data/secrets
+
+  flower:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    <<: *backend-env
+    restart: unless-stopped
+    command: celery -A app.workers.celery_app.celery flower --port=5555
+    ports:
+      - "5555:5555"
+    profiles: ["monitoring"]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:
+  redisdata:
+  storage:
+  secrets:
