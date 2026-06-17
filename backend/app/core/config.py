@@ -7,6 +7,7 @@ one place. Import the singleton ``settings`` everywhere instead of reading
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, field_validator
@@ -14,10 +15,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 TranscriptionProvider = Literal["openai_whisper", "local_whisper", "deepgram"]
 
+# Resolve .env locations absolutely so settings load no matter the working
+# directory (repo root or backend/). config.py lives at backend/app/core/.
+_BACKEND_DIR = Path(__file__).resolve().parents[2]
+_ROOT_DIR = _BACKEND_DIR.parent
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        # Later files win; check backend/.env first, then the repo-root .env.
+        env_file=(str(_BACKEND_DIR / ".env"), str(_ROOT_DIR / ".env"), ".env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",

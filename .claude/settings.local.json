@@ -11,7 +11,8 @@
       "Bash(where pip *)",
       "Bash(py --version)",
       "Bash(py -0p)",
-      "Bash(py -)"
+      "Bash(py -)",
+      "PowerShell($psql = \"C:\\\\Program Files\\\\PostgreSQL\\\\16\\\\bin\\\\psql.exe\"; $env:PGPASSWORD = \"elets_password\"; Write-Output \"=== enum types present now ===\"; & $psql -U elets -h localhost -p 5432 -d elets_transcripts -t -c \"SELECT typname FROM pg_type WHERE typname IN \\('processing_status','user_role','export_status'\\);\"; Write-Output \"=== tables present ===\"; & $psql -U elets -h localhost -p 5432 -d elets_transcripts -t -c \"SELECT tablename FROM pg_tables WHERE schemaname='public';\"; Write-Output \"=== alembic_version ===\"; & $psql -U elets -h localhost -p 5432 -d elets_transcripts -t -c \"SELECT version_num FROM alembic_version;\" 2>&1)"
     ]
   }
 }

@@ -53,7 +53,13 @@ class Video(Base):
     thumbnail: Mapped[Optional[str]] = mapped_column(String(512))
 
     status: Mapped[ProcessingStatus] = mapped_column(
-        SAEnum(ProcessingStatus, name="processing_status"),
+        # Store the lowercase .value ("queued"), not the member name, to match
+        # the DB enum created by the migration.
+        SAEnum(
+            ProcessingStatus,
+            name="processing_status",
+            values_callable=lambda e: [m.value for m in e],
+        ),
         default=ProcessingStatus.QUEUED,
         index=True,
         nullable=False,

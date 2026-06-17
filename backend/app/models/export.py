@@ -30,7 +30,13 @@ class ExportRecord(Base):
     sheet_name: Mapped[Optional[str]] = mapped_column(String(255))
     spreadsheet_id: Mapped[Optional[str]] = mapped_column(String(128))
     status: Mapped[ExportStatus] = mapped_column(
-        SAEnum(ExportStatus, name="export_status"), default=ExportStatus.SUCCESS
+        # Store the lowercase .value ("success"), not the member name.
+        SAEnum(
+            ExportStatus,
+            name="export_status",
+            values_callable=lambda e: [m.value for m in e],
+        ),
+        default=ExportStatus.SUCCESS,
     )
     error_message: Mapped[Optional[str]] = mapped_column(Text)
 

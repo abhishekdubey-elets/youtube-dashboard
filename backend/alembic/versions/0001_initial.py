@@ -15,6 +15,9 @@ down_revision = None
 branch_labels = None
 depends_on = None
 
+# Each enum is referenced by exactly one table, so create_table()/drop_table()
+# manage the CREATE TYPE / DROP TYPE lifecycle automatically (the standard
+# Alembic pattern). No explicit .create()/.drop() calls — those would duplicate.
 processing_status = sa.Enum(
     "queued",
     "downloading",
@@ -32,11 +35,6 @@ export_status = sa.Enum("success", "failed", name="export_status")
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
-    processing_status.create(bind, checkfirst=True)
-    user_role.create(bind, checkfirst=True)
-    export_status.create(bind, checkfirst=True)
-
     op.create_table(
         "users",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -124,12 +122,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # drop_table() auto-drops each table's associated enum type.
     op.drop_table("exports")
     op.drop_table("summaries")
     op.drop_table("transcripts")
     op.drop_table("videos")
     op.drop_table("users")
-    bind = op.get_bind()
-    export_status.drop(bind, checkfirst=True)
-    processing_status.drop(bind, checkfirst=True)
-    user_role.drop(bind, checkfirst=True)

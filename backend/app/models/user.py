@@ -24,7 +24,10 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(String(255))
     full_name: Mapped[str | None] = mapped_column(String(255))
     role: Mapped[UserRole] = mapped_column(
-        SAEnum(UserRole, name="user_role"), default=UserRole.ADMIN
+        # values_callable -> store the lowercase .value ("admin"), not the
+        # member name ("ADMIN"), to match the DB enum created by the migration.
+        SAEnum(UserRole, name="user_role", values_callable=lambda e: [m.value for m in e]),
+        default=UserRole.ADMIN,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
