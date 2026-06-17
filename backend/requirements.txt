@@ -23,7 +23,10 @@ redis==5.2.1
 flower==2.0.1
 
 # --- YouTube / media -------------------------------------------------------
-yt-dlp==2024.12.13
+# Keep yt-dlp recent: YouTube changes its internals often and older releases
+# fail with "Requested format is not available". Upgrade if extraction breaks:
+#   pip install -U yt-dlp
+yt-dlp>=2026.6.9
 # NOTE: ffmpeg must be available on the system PATH (installed in Dockerfile)
 
 # --- Transcription providers ----------------------------------------------
