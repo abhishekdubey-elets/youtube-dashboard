@@ -1,10 +1,16 @@
-"""Local Whisper Large-V3 provider via faster-whisper (Option 2).
+"""Local Whisper provider via faster-whisper (Option 2).
 
-The model is loaded lazily and cached at module level so the worker only pays
-the load cost once per process.
+Optimized for throughput on CPU:
+* ``BatchedInferencePipeline`` transcribes VAD-segmented chunks in parallel
+  batches (typically 2-4x faster than sequential decoding).
+* Greedy decoding (``beam_size=1``) and all CPU cores by default.
+
+The model + pipeline are loaded lazily and cached at module level so the worker
+only pays the load cost once per process.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -18,7 +24,8 @@ from app.services.transcription.base import (
 
 log = get_logger(__name__)
 
-_model_cache: dict[str, object] = {}
+# Cache keyed by model size so repeated tasks reuse the loaded weights.
+_cache: dict[str, dict[str, object]] = {}
 
 
 def _resolve_device() -> tuple[str, str]:
@@ -41,38 +48,78 @@ class LocalWhisperProvider(TranscriptionProvider):
 
     def __init__(self) -> None:
         self.model_size = settings.LOCAL_WHISPER_MODEL
-        self._model = self._get_model()
+        self.batch_size = max(1, settings.LOCAL_WHISPER_BATCH_SIZE)
+        self.beam_size = max(1, settings.LOCAL_WHISPER_BEAM_SIZE)
+        bundle = self._get_bundle()
+        self._model = bundle["model"]
+        self._batched = bundle.get("batched")  # may be None on older versions
 
-    def _get_model(self):
-        if self.model_size in _model_cache:
-            return _model_cache[self.model_size]
+    def _get_bundle(self) -> dict[str, object]:
+        if self.model_size in _cache:
+            return _cache[self.model_size]
         try:
             from faster_whisper import WhisperModel
         except ImportError as exc:  # pragma: no cover
             raise TranscriptionError(
                 "faster-whisper is not installed for local transcription."
             ) from exc
+
         device, compute = _resolve_device()
-        log.info("loading_local_whisper", model=self.model_size, device=device)
-        model = WhisperModel(self.model_size, device=device, compute_type=compute)
-        _model_cache[self.model_size] = model
-        return model
+        cpu_threads = settings.LOCAL_WHISPER_CPU_THREADS or (os.cpu_count() or 4)
+        log.info(
+            "loading_local_whisper",
+            model=self.model_size,
+            device=device,
+            compute=compute,
+            cpu_threads=cpu_threads,
+            batch_size=self.batch_size,
+        )
+        model = WhisperModel(
+            self.model_size,
+            device=device,
+            compute_type=compute,
+            cpu_threads=cpu_threads,
+        )
+
+        batched: object | None = None
+        if self.batch_size > 1:
+            try:
+                from faster_whisper import BatchedInferencePipeline
+
+                batched = BatchedInferencePipeline(model=model)
+            except Exception as exc:  # pragma: no cover - older faster-whisper
+                log.warning("batched_pipeline_unavailable", error=str(exc))
+
+        bundle = {"model": model, "batched": batched}
+        _cache[self.model_size] = bundle
+        return bundle
 
     def transcribe(
         self, audio_path: Path, language: Optional[str] = None
     ) -> TranscriptionResult:
         lang = language or settings.TRANSCRIPTION_LANGUAGE or None
         try:
-            segments_iter, info = self._model.transcribe(
-                str(audio_path), language=lang, vad_filter=True
-            )
+            if self._batched is not None:
+                segments_iter, info = self._batched.transcribe(  # type: ignore[attr-defined]
+                    str(audio_path),
+                    language=lang,
+                    batch_size=self.batch_size,
+                    beam_size=self.beam_size,
+                    vad_filter=True,
+                )
+            else:
+                segments_iter, info = self._model.transcribe(  # type: ignore[attr-defined]
+                    str(audio_path),
+                    language=lang,
+                    beam_size=self.beam_size,
+                    vad_filter=True,
+                    condition_on_previous_text=False,
+                )
             segments = []
             parts: list[str] = []
             for seg in segments_iter:
                 parts.append(seg.text)
-                segments.append(
-                    {"start": seg.start, "end": seg.end, "text": seg.text}
-                )
+                segments.append({"start": seg.start, "end": seg.end, "text": seg.text})
         except Exception as exc:  # noqa: BLE001
             raise TranscriptionError(f"Local Whisper failed: {exc}") from exc
 

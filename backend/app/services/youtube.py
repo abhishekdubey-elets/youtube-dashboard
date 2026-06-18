@@ -29,7 +29,17 @@ _PLAYLIST_ID_RE = re.compile(r"[?&]list=([A-Za-z0-9_-]+)")
 
 
 class YouTubeError(Exception):
-    """Normalized, user-presentable YouTube error."""
+    """Normalized, user-presentable YouTube error.
+
+    ``permanent`` marks errors that will never succeed on retry (private,
+    deleted/removed, age-restricted, members-only) so the worker can fail fast
+    instead of burning retries. Transient errors (network, rate-limiting)
+    default to ``permanent=False`` and are retried.
+    """
+
+    def __init__(self, message: str, permanent: bool = False) -> None:
+        super().__init__(message)
+        self.permanent = permanent
 
 
 @dataclass
@@ -51,6 +61,11 @@ def _base_opts() -> dict[str, Any]:
         "noplaylist": False,
         "ignoreerrors": False,
         "extract_flat": False,
+        # Force IPv4: googlevideo CDN nodes frequently time out over broken IPv6
+        # routing ("Connection to ...googlevideo.com timed out"). Binding to IPv4
+        # avoids those dead routes.
+        "source_address": "0.0.0.0",
+        "socket_timeout": 30,
     }
     if settings.YTDLP_COOKIES_FILE:
         opts["cookiefile"] = settings.YTDLP_COOKIES_FILE
@@ -72,16 +87,29 @@ def is_playlist_url(url: str) -> bool:
 
 
 def _map_error(exc: Exception) -> YouTubeError:
-    msg = str(exc).lower()
-    if "private" in msg:
-        return YouTubeError("This video is private.")
-    if "deleted" in msg or "removed" in msg or "unavailable" in msg:
-        return YouTubeError("This video has been deleted or is unavailable.")
+    raw = str(exc).strip()
+    msg = raw.lower()
+    if "private video" in msg or "this video is private" in msg:
+        return YouTubeError("This video is private.", permanent=True)
+    if "removed by the uploader" in msg:
+        return YouTubeError("This video has been removed by the uploader.", permanent=True)
+    if "deleted" in msg or "removed" in msg or "no longer available" in msg or "unavailable" in msg:
+        return YouTubeError("This video has been deleted or is unavailable.", permanent=True)
     if "age" in msg and "restrict" in msg:
-        return YouTubeError("This video is age-restricted; cookies are required.")
+        return YouTubeError(
+            "This video is age-restricted; provide a cookies file to access it.",
+            permanent=True,
+        )
     if "members-only" in msg or "join this channel" in msg:
-        return YouTubeError("This video is members-only.")
-    return YouTubeError(f"YouTube error: {exc}")
+        return YouTubeError("This video is members-only.", permanent=True)
+    if "sign in to confirm" in msg or "not a bot" in msg:
+        return YouTubeError(
+            "YouTube is rate-limiting downloads (bot check). A cookies file may help.",
+            permanent=False,
+        )
+    # Unknown / likely transient (network, format hiccup): keep the real reason
+    # and allow retries.
+    return YouTubeError(f"YouTube error: {raw}", permanent=False)
 
 
 def _to_meta(info: dict[str, Any], playlist_name: Optional[str] = None) -> VideoMeta:
@@ -164,6 +192,13 @@ def download_audio(youtube_video_id: str) -> Path:
         "noplaylist": True,
         "format": "bestaudio/best",
         "outtmpl": out_template,
+        # Long videos download faster by pulling DASH audio fragments in parallel.
+        "concurrent_fragment_downloads": 5,
+        "retries": 10,
+        "fragment_retries": 10,
+        # Prefer the android player client: its stream URLs avoid the transient
+        # HTTP 403s that hit the default/web client, while web stays as fallback.
+        "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",

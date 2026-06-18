@@ -86,6 +86,14 @@ class Settings(BaseSettings):
     LOCAL_WHISPER_MODEL: str = "large-v3"
     LOCAL_WHISPER_DEVICE: str = "auto"
     LOCAL_WHISPER_COMPUTE_TYPE: str = "auto"
+    # Speed knobs for local transcription:
+    #  - BATCH_SIZE > 1 enables faster-whisper's BatchedInferencePipeline
+    #    (transcribes VAD chunks in parallel batches — big CPU/GPU speedup).
+    #  - BEAM_SIZE 1 = greedy decoding (fastest); raise for slightly better accuracy.
+    #  - CPU_THREADS 0 = use all cores.
+    LOCAL_WHISPER_BATCH_SIZE: int = 8
+    LOCAL_WHISPER_BEAM_SIZE: int = 1
+    LOCAL_WHISPER_CPU_THREADS: int = 0
 
     DEEPGRAM_API_KEY: str = ""
     DEEPGRAM_MODEL: str = "nova-2"

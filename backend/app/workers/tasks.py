@@ -146,11 +146,15 @@ def process_video(self, video_id: int) -> dict:
 
     except Exception as exc:  # noqa: BLE001
         logger.exception("pipeline failed for video %s", video_id)
+        # Permanent YouTube errors (private/removed/age-restricted/members-only)
+        # will never succeed on retry, so fail immediately instead of burning
+        # retries. Everything else is treated as transient and retried.
+        permanent = isinstance(exc, youtube.YouTubeError) and exc.permanent
         with session_scope() as db:
             video = _get_video(db, video_id)
             if video is not None:
                 video.retry_count = (video.retry_count or 0) + 1
-                if self.request.retries < settings.MAX_RETRIES:
+                if not permanent and self.request.retries < settings.MAX_RETRIES:
                     db.add(video)
                     db.commit()
                     storage.cleanup_video_files(yt_id)
