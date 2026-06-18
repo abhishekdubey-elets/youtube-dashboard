@@ -1,9 +1,11 @@
-"""Google Sheets export routes: config, credentials upload, manual export, history."""
+"""Export routes: Google Sheets, Excel download, config, history."""
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -19,7 +21,7 @@ from app.schemas.export import (
     ManualExportRequest,
 )
 from app.schemas.video import ExportRead
-from app.services import google_sheets
+from app.services import excel_export, google_sheets
 from app.services.app_settings import get_export_config, update_export_config
 
 router = APIRouter(prefix="/exports", tags=["exports"])
@@ -82,6 +84,37 @@ async def manual_export(
             errors.append(f"{video.youtube_video_id}: {exc}")
     await db.commit()
     return ExportResult(exported=exported, failed=failed, errors=errors)
+
+
+@router.get("/excel")
+async def export_excel(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+    video_ids: str | None = Query(
+        None, description="Comma-separated video ids; default = all completed."
+    ),
+):
+    """Download all completed videos as an .xlsx file (no Google setup needed)."""
+    stmt = (
+        select(Video)
+        .options(selectinload(Video.transcript), selectinload(Video.summary))
+        .where(Video.status == ProcessingStatus.COMPLETED)
+        .order_by(Video.id)
+    )
+    if video_ids:
+        ids = [int(x) for x in video_ids.split(",") if x.strip().isdigit()]
+        if ids:
+            stmt = stmt.where(Video.id.in_(ids))
+    videos = (await db.execute(stmt)).scalars().all()
+
+    data = excel_export.build_workbook(videos)
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        headers={"Content-Disposition": 'attachment; filename="elets_transcripts.xlsx"'},
+    )
 
 
 @router.get("", response_model=dict)

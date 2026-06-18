@@ -155,6 +155,19 @@ export async function exportToSheet(videoIds?: number[]): Promise<ExportResult> 
   return data;
 }
 
+export async function downloadExcel(videoIds?: number[]): Promise<void> {
+  const params = videoIds && videoIds.length ? { video_ids: videoIds.join(',') } : {};
+  const res = await api.get('/exports/excel', { params, responseType: 'blob' });
+  const url = URL.createObjectURL(res.data as Blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'elets_transcripts.xlsx';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export async function getExports(page = 1, pageSize = 20): Promise<PaginatedExports> {
   const { data } = await api.get<PaginatedExports>('/exports', {
     params: { page, page_size: pageSize },
