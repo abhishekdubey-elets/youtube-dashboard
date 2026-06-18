@@ -15,6 +15,11 @@ from typing import Optional
 
 from celery import shared_task
 from celery.utils.log import get_task_logger
+
+# Importing the configured app here guarantees it is created and registered as
+# the default app whenever these tasks are imported (e.g. by the FastAPI
+# process), so `.delay()` enqueues to Redis rather than the amqp:// default.
+from app.workers import celery_app  # noqa: F401
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -96,18 +101,29 @@ def process_video(self, video_id: int) -> dict:
             db.add(transcript)
             db.commit()
 
-        # 3. Summarize --------------------------------------------------------
-        with session_scope() as db:
-            _set_status(db, _get_video(db, video_id), ProcessingStatus.SUMMARIZING)
-        summary_data = summarization.generate_summary(title, channel, result.text)
-
-        with session_scope() as db:
-            video = _get_video(db, video_id)
-            summary = video.summary or Summary(video_id=video.id)
-            for key, value in summary_data.items():
-                setattr(summary, key, value)
-            db.add(summary)
-            db.commit()
+        # 3. Summarize (optional) --------------------------------------------
+        # The AI summary requires an OpenAI key. Transcription can run locally
+        # without one, so summarization is best-effort: if no key is configured
+        # (or the call fails) we keep the transcript and still complete.
+        if summarization.is_available():
+            with session_scope() as db:
+                _set_status(db, _get_video(db, video_id), ProcessingStatus.SUMMARIZING)
+            try:
+                summary_data = summarization.generate_summary(title, channel, result.text)
+                with session_scope() as db:
+                    video = _get_video(db, video_id)
+                    summary = video.summary or Summary(video_id=video.id)
+                    for key, value in summary_data.items():
+                        setattr(summary, key, value)
+                    db.add(summary)
+                    db.commit()
+            except Exception as exc:  # noqa: BLE001 — summary must not fail the pipeline
+                logger.warning("summarization skipped for video %s: %s", video_id, exc)
+        else:
+            logger.info(
+                "summarization skipped for video %s (no OPENAI_API_KEY configured)",
+                video_id,
+            )
 
         # 4. Optional auto-export --------------------------------------------
         exported = False

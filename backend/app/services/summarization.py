@@ -21,6 +21,27 @@ class SummarizationError(Exception):
     """Raised when summary generation fails."""
 
 
+def is_available() -> bool:
+    """True if AI summarization can run with the current configuration.
+
+    * provider "ollama": a local LLM (no API key) — assumed available; if the
+      Ollama server is down the call fails and the worker skips the summary.
+    * provider "openai": requires OPENAI_API_KEY.
+
+    The summary step is optional: with local Whisper transcription the pipeline
+    completes end-to-end even when this returns False (the worker just skips it).
+    """
+    if settings.SUMMARIZATION_PROVIDER == "ollama":
+        return True
+    return bool(settings.OPENAI_API_KEY)
+
+
+def _active_model() -> str:
+    if settings.SUMMARIZATION_PROVIDER == "ollama":
+        return settings.OLLAMA_MODEL
+    return settings.OPENAI_SUMMARY_MODEL
+
+
 SYSTEM_PROMPT = (
     "You are an expert media analyst for the elets YouTube channel. You read "
     "video transcripts and produce precise, structured editorial summaries. "
@@ -58,16 +79,26 @@ def _build_user_prompt(title: str, channel: str, transcript: str) -> str:
     )
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=2, max=20))
-def _call_openai(title: str, channel: str, transcript: str) -> dict[str, Any]:
+def _make_client():
+    """Build an OpenAI-compatible client for the configured provider.
+
+    Ollama exposes an OpenAI-compatible API, so the same client/code path
+    serves both providers — only base_url, api_key and model differ.
+    """
     from openai import OpenAI
 
+    if settings.SUMMARIZATION_PROVIDER == "ollama":
+        return OpenAI(base_url=settings.OLLAMA_BASE_URL, api_key="ollama")
     if not settings.OPENAI_API_KEY:
         raise SummarizationError("OPENAI_API_KEY is not configured.")
+    return OpenAI(api_key=settings.OPENAI_API_KEY)
 
-    client = OpenAI(api_key=settings.OPENAI_API_KEY)
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=2, max=20))
+def _call_openai(title: str, channel: str, transcript: str) -> dict[str, Any]:
+    client = _make_client()
     resp = client.chat.completions.create(
-        model=settings.OPENAI_SUMMARY_MODEL,
+        model=_active_model(),
         temperature=settings.OPENAI_SUMMARY_TEMPERATURE,
         response_format={"type": "json_object"},
         messages=[
@@ -103,7 +134,7 @@ def generate_summary(title: str, channel: str, transcript: str) -> dict[str, Any
         "tags": _as_list(data.get("tags")),
         "sentiment": data.get("sentiment"),
         "sentiment_detail": data.get("sentiment_detail"),
-        "model": settings.OPENAI_SUMMARY_MODEL,
+        "model": _active_model(),
     }
 
 

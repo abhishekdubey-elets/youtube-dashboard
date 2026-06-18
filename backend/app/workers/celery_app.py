@@ -30,6 +30,12 @@ celery.conf.update(
     task_max_retries=settings.MAX_RETRIES,
 )
 
+# Make this the current/default app so `@shared_task(...).delay()` routes to
+# THIS broker (Redis) from any process that imports it — notably the FastAPI
+# API process, which enqueues tasks without launching a worker. Without this,
+# shared tasks fall back to Celery's default amqp:// broker and fail.
+celery.set_default()
+
 # Periodic maintenance tasks
 celery.conf.beat_schedule = {
     "purge-stale-audio": {

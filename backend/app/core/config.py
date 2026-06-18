@@ -14,6 +14,7 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 TranscriptionProvider = Literal["openai_whisper", "local_whisper", "deepgram"]
+SummarizationProvider = Literal["openai", "ollama"]
 
 # Resolve .env locations absolutely so settings load no matter the working
 # directory (repo root or backend/). config.py lives at backend/app/core/.
@@ -74,6 +75,13 @@ class Settings(BaseSettings):
     OPENAI_WHISPER_MODEL: str = "whisper-1"
     OPENAI_SUMMARY_MODEL: str = "gpt-4.1"
     OPENAI_SUMMARY_TEMPERATURE: float = 0.2
+
+    # --- Summarization -----------------------------------------------------
+    # "openai" -> GPT via the OpenAI API (needs OPENAI_API_KEY)
+    # "ollama" -> a local LLM served by Ollama (no API key, fully offline)
+    SUMMARIZATION_PROVIDER: SummarizationProvider = "openai"
+    OLLAMA_BASE_URL: str = "http://localhost:11434/v1"
+    OLLAMA_MODEL: str = "llama3.2:3b"
 
     LOCAL_WHISPER_MODEL: str = "large-v3"
     LOCAL_WHISPER_DEVICE: str = "auto"
