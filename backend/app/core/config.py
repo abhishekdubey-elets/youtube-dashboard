@@ -82,6 +82,16 @@ class Settings(BaseSettings):
     SUMMARIZATION_PROVIDER: SummarizationProvider = "openai"
     OLLAMA_BASE_URL: str = "http://localhost:11434/v1"
     OLLAMA_MODEL: str = "llama3.2:3b"
+    # Speed knobs (mostly relevant on CPU):
+    #  - MAX_TRANSCRIPT_CHARS caps how much transcript the model reads (prefill).
+    #  - MAX_OUTPUT_TOKENS caps how much it generates.
+    #  - OLLAMA_NUM_CTX is the context window; keep it just big enough for the
+    #    capped transcript + output. OLLAMA_KEEP_ALIVE keeps the model warm so
+    #    back-to-back videos don't pay the reload cost.
+    SUMMARY_MAX_TRANSCRIPT_CHARS: int = 24000
+    SUMMARY_MAX_OUTPUT_TOKENS: int = 1024
+    OLLAMA_NUM_CTX: int = 8192
+    OLLAMA_KEEP_ALIVE: str = "30m"
 
     LOCAL_WHISPER_MODEL: str = "large-v3"
     LOCAL_WHISPER_DEVICE: str = "auto"

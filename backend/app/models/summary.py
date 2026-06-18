@@ -36,6 +36,9 @@ class Summary(Base):
     sentiment: Mapped[Optional[str]] = mapped_column(String(32))
     sentiment_detail: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
 
+    # Main guest / speaker of the episode (LLM-extracted, title fallback).
+    speaker: Mapped[Optional[str]] = mapped_column(String(255))
+
     model: Mapped[Optional[str]] = mapped_column(String(64))
 
     created_at: Mapped[datetime] = mapped_column(

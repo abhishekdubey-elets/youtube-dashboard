@@ -49,11 +49,12 @@ SYSTEM_PROMPT = (
     "fabricate quotes — only use verbatim text present in the transcript."
 )
 
-# Truncate very long transcripts to stay within context limits (~ chars).
-MAX_TRANSCRIPT_CHARS = 90_000
-
 SCHEMA_HINT = {
     "executive_summary": "string — 2-4 sentence high-level overview",
+    "speaker": (
+        "string — the name of the main guest/speaker/interviewee of this "
+        "episode (e.g. 'Balaji Nuthalapadi'). Empty string if unclear."
+    ),
     "key_points": ["string — main discussion points"],
     "key_insights": ["string — non-obvious takeaways"],
     "quotes": ["string — verbatim notable quotes"],
@@ -67,7 +68,7 @@ SCHEMA_HINT = {
 
 
 def _build_user_prompt(title: str, channel: str, transcript: str) -> str:
-    transcript = transcript[:MAX_TRANSCRIPT_CHARS]
+    transcript = transcript[: settings.SUMMARY_MAX_TRANSCRIPT_CHARS]
     return (
         f"Video title: {title}\n"
         f"Channel: {channel}\n\n"
@@ -97,15 +98,24 @@ def _make_client():
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=2, max=20))
 def _call_openai(title: str, channel: str, transcript: str) -> dict[str, Any]:
     client = _make_client()
-    resp = client.chat.completions.create(
-        model=_active_model(),
-        temperature=settings.OPENAI_SUMMARY_TEMPERATURE,
-        response_format={"type": "json_object"},
-        messages=[
+    kwargs: dict[str, Any] = {
+        "model": _active_model(),
+        "temperature": settings.OPENAI_SUMMARY_TEMPERATURE,
+        "response_format": {"type": "json_object"},
+        "max_tokens": settings.SUMMARY_MAX_OUTPUT_TOKENS,
+        "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": _build_user_prompt(title, channel, transcript)},
         ],
-    )
+    }
+    # Ollama-specific tuning: cap the context window (smaller = faster prefill)
+    # and keep the model resident so consecutive videos skip the reload cost.
+    if settings.SUMMARIZATION_PROVIDER == "ollama":
+        kwargs["extra_body"] = {
+            "options": {"num_ctx": settings.OLLAMA_NUM_CTX},
+            "keep_alive": settings.OLLAMA_KEEP_ALIVE,
+        }
+    resp = client.chat.completions.create(**kwargs)
     content = resp.choices[0].message.content or "{}"
     return json.loads(content)
 
@@ -125,6 +135,7 @@ def generate_summary(title: str, channel: str, transcript: str) -> dict[str, Any
     # Normalize into the Summary model's field names.
     return {
         "summary": data.get("executive_summary", ""),
+        "speaker": (str(data.get("speaker") or "").strip() or None),
         "key_points": _as_list(data.get("key_points")),
         "key_insights": _as_list(data.get("key_insights")),
         "quotes": _as_list(data.get("quotes")),

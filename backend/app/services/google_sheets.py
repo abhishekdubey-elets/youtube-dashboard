@@ -23,10 +23,11 @@ HEADER = [
     "Video ID",
     "Video Title",
     "Channel Name",
+    "Speaker / Guest",
     "Playlist Name",
     "Upload Date",
     "Duration",
-    "Transcript",
+    "Transcript (Timestamped)",
     "Summary",
     "Keywords",
     "Sentiment",
@@ -34,6 +35,55 @@ HEADER = [
     "Processed Date",
     "Status",
 ]
+
+
+def _fmt_timestamp(seconds: Any) -> str:
+    """Format seconds as M:SS or H:MM:SS."""
+    try:
+        s = int(float(seconds))
+    except (TypeError, ValueError):
+        return "0:00"
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    if h:
+        return f"{h}:{m:02d}:{sec:02d}"
+    return f"{m}:{sec:02d}"
+
+
+def timestamped_transcript(transcript: Any) -> str:
+    """Build a '[mm:ss] (Sx) text' transcript from stored segments."""
+    if not transcript:
+        return ""
+    segments = transcript.segments or []
+    if not segments:
+        return transcript.full_transcript or ""
+    lines: list[str] = []
+    for seg in segments:
+        ts = _fmt_timestamp(seg.get("start"))
+        spk = seg.get("speaker")
+        prefix = f"[{ts}]"
+        if spk is not None and spk != "":
+            prefix += f" S{spk}"
+        lines.append(f"{prefix} {(seg.get('text') or '').strip()}")
+    return "\n".join(lines)
+
+
+def guess_speaker(video: Any) -> str:
+    """Best-effort guest/speaker: LLM-extracted value, else parse the title.
+
+    elets titles commonly look like 'Topic | Guest Name | Event', so the
+    middle pipe-delimited segment is usually the guest.
+    """
+    summary = getattr(video, "summary", None)
+    if summary is not None and getattr(summary, "speaker", None):
+        return summary.speaker
+    title = video.video_title or ""
+    parts = [p.strip() for p in title.split("|") if p.strip()]
+    if len(parts) >= 3:
+        return parts[1]  # middle segment is typically the guest
+    if len(parts) == 2:
+        return parts[1]
+    return ""
 
 
 class GoogleSheetsError(Exception):
@@ -88,10 +138,11 @@ def build_row(video: Any) -> list[str]:
         video.youtube_video_id or "",
         video.video_title or "",
         video.channel_name or "",
+        guess_speaker(video),
         video.playlist_name or "",
         video.upload_date or "",
         str(video.duration or ""),
-        (transcript.full_transcript if transcript else "")[:48000],
+        timestamped_transcript(transcript)[:48000],
         (summary.summary if summary else "")[:20000],
         keywords,
         (summary.sentiment if summary else "") or "",

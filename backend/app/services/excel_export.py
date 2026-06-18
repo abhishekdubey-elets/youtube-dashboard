@@ -17,8 +17,8 @@ from app.services.google_sheets import HEADER, build_row
 
 # Excel hard limit per cell.
 _CELL_LIMIT = 32_767
-# Reasonable column widths matching HEADER order.
-_WIDTHS = [40, 14, 44, 22, 22, 14, 10, 70, 70, 32, 12, 14, 22, 12]
+# Reasonable column widths matching HEADER order (15 columns).
+_WIDTHS = [40, 14, 44, 22, 24, 22, 14, 10, 70, 70, 32, 12, 14, 22, 12]
 
 
 def _clean(value: Any) -> str:
